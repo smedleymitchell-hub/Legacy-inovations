@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Legacy Innovations | Black-Owned Brand Marketplace</title>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    :root {
+        --black: #0a0a0a;
+        --black-light: #151515;
+        --black-lighter: #1e1e1e;
+        --gold: #D4AF37;
+        --gold-dark: #B8960F;
+        --gold-light: #E8C766;
+        --white: #f5f5f5;
+        --gray: #8a8a8a;
+        --transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    html {
+        scroll-behavior: smooth;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background-color: var(--black);
+        color: var(--white);
+        line-height: 1.6;
+        overflow-x: hidden;
+    }
+
+    /* Setup Notice */
+    .setup-notice {
+        background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+        color: var(--black);
+        padding: 1.25rem;
+        text-align: center;
+        position: relative;
+        box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3);
+    }
+
+    .setup-notice-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .setup-notice h2 {
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
+
+    .setup-notice p {
+        font-size: 0.95rem;
+        font-weight: 500;
+    }
+
+    .setup-notice svg {
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+    }
+
+    /* Header */
+    header {
+        background: rgba(10, 10, 10, 0.95);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        transition: var(--transition);
+    }
+
+    .header-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 1.5rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        text-decoration: none;
+        color: var(--white);
+    }
+
+    .logo-svg {
+        width: 40px;
+        height: 40px;
+    }
+
+    .logo-text {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+
+    .logo-text span {
+        color: var(--gold);
+    }
+
+    nav {
+        display: flex;
+        gap: 2.5rem;
+        align-items: center;
+    }
+
+    nav a {
+        color: var(--white);
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.95rem;
+        letter-spacing: 0.3px;
+        position: relative;
+        transition: var(--transition);
+    }
+
+    nav a::after {
+        content: '';
+        position: absolute;
+        bottom: -4px;
+        left: 0;
+        width: 0;
+        height: 2px;
+        background: var(--gold);
+        transition: width 0.3s ease;
+    }
+
+    nav a:hover {
+        color: var(--gold);
+    }
+
+    nav a:hover::after {
+        width: 100%;
+    }
+
+    .mobile-toggle {
+        display: none;
+        background: none;
+        border: 2px solid var(--gold);
+        border-radius: 8px;
+        padding: 0.5rem;
+        cursor: pointer;
+    }
+
+    .mobile-toggle svg {
+        width: 24px;
+        height: 24px;
+        fill: var(--gold);
+    }
+
+    /* Hero */
+    .hero {
+        position: relative;
+        padding: 6rem 2rem 4rem;
+        background: linear-gradient(180deg, var(--black) 0%, var(--black-light) 100%);
+        overflow: hidden;
+    }
+
+    .hero::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -20%;
+        width: 800px;
+        height: 800px;
+        background: radial-gradient(circle, rgba(212, 175, 55, 0.08) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: float 20s ease-in-out infinite;
+    }
+
+    @keyframes float {
+        0%, 100% { transform: translate(0, 0); }
+        50% { transform: translate(-50px, 50px); }
+    }
+
+    .hero-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 1;
+    }
+
+    .hero-badge {
+        display: inline-block;
+        padding: 0.5rem 1.25rem;
+        background: rgba(212, 175, 55, 0.1);
+        border: 1px solid rgba(212, 175, 55, 0.3);
+        border-radius: 50px;
+        color: var(--gold);
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 2rem;
+        animation: fadeInDown 0.8s ease;
+    }
+
+    @keyframes fadeInDown {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .hero h1 {
+        font-size: clamp(2.5rem, 8vw, 5rem);
+        font-weight: 800;
+        line-height: 1.1;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(135deg, var(--white) 0%, var(--gold-light) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: fadeInUp 0.8s ease 0.2s both;
+    }
+
+    .hero p {
+        font-size: clamp(1rem, 2vw, 1.25rem);
+        color: var(--gray);
+        max-width: 700px;
+        margin: 0 auto 3rem;
+        animation: fadeInUp 0.8s ease 0.4s both;
+    }
+
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .hero-cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 2.5rem;
+        background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+        color: var(--black);
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 1rem;
+        border-radius: 50px;
+        box-shadow: 0 10px 30px rgba(212, 175, 55, 0.3);
+        transition: var(--transition);
+        animation: fadeInUp 0.8s ease 0.6s both;
+    }
+
+    .hero-cta:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 15px 40px rgba(212, 175, 55, 0.4);
+    }
+
+    .hero-cta svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* Categories */
+    .categories {
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .category-filters {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-bottom: 3rem;
+    }
+
+    .filter-btn {
+        padding: 0.75rem 1.5rem;
+        background: var(--black-lighter);
+        border: 1px solid rgba(212, 175, 55, 0.2);
+        color: var(--white);
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+
+    .filter-btn:hover,
+    .filter-btn.active {
+        background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+        color: var(--black);
+        border-color: var(--gold);
+        transform: translateY(-2px);
+    }
+
+    /* Products Grid */
+    .products-section {
+        padding: 2rem 2rem 6rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .section-header {
+        text-align: center;
+        margin-bottom: 4rem;
+    }
+
+    .section-header h2 {
+        font-size: clamp(2rem, 5vw, 3rem);
+        font-weight: 800;
+        margin-bottom: 1rem;
+    }
+
+    .section-header p {
+        color: var(--gray);
+        font-size: 1.1rem;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .category-section {
+        margin-bottom: 5rem;
+    }
+
+    .category-title {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid rgba(212, 175, 55, 0.2);
+    }
+
+    .category-icon {
+        width: 48px;
+        height: 48px;
+        background: linear-gradient(135deg, rgba(212, 175, 55, 0.2) 0%, rgba(212, 175, 55, 0.05) 100%);
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .category-icon svg {
+        width: 28px;
+        height: 28px;
+        fill: var(--gold);
+    }
+
+    .category-title h3 {
+        font-size: 1.75rem;
+        font-weight: 700;
+    }
+
+    .products-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 2rem;
+    }
+
+    .product-card {
+        background: var(--black-lighter);
+        border: 1px solid rgba(212, 175, 55, 0.1);
+        border-radius: 20px;
+        overflow: hidden;
+        transition: var(--transition);
+        position: relative;
+    }
+
+    .product-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--gold) 0%, var(--gold-dark) 100%);
+        transform: scaleX(0);
+        transition: transform 0.4s ease;
+    }
+
+    .product-card:hover {
+        transform: translateY(-8px);
+        border-color: rgba(212, 175, 55, 0.3);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(212, 175, 55, 0.1);
+    }
+
+    .product-card:hover::before {
+        transform: scaleX(1);
+    }
+
+    .product-image {
+        width: 100%;
+        height: 240px;
+        background: linear-gradient(135deg, var(--black-light) 0%, var(--black) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .product-image svg {
+        width: 100px;
+        height: 100px;
+        fill: var(--gold);
+        opacity: 0.3;
+        transition: var(--transition);
+    }
+
+    .product-card:hover .product-image svg {
+        transform: scale(1.1);
+        opacity: 0.5;
+    }
+
+    .product-badge {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        padding: 0.4rem 0.9rem;
+        background: rgba(212, 175, 55, 0.9);
+        color: var(--black);
+        font-size: 0.75rem;
+        font-weight: 700;
+        border-radius: 50px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .product-content {
+        padding: 1.75rem;
+    }
+
+    .product-brand {
+        color: var(--gold);
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 0.5rem;
+    }
+
+    .product-name {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+        line-height: 1.3;
+    }
+
+    .product-desc {
+        color: var(--gray);
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+    }
+
+    .product-footer {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .buy-btn {
+        width: 100%;
+        padding: 0.9rem 1.5rem;
+        background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+        color: var(--black);
+        border: none;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: var(--transition);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        text-decoration: none;
+    }
+
+    .buy-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(212, 175, 55, 0.3);
+    }
+
+    .buy-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .affiliate-note {
+        text-align: center;
+        font-size: 0.75rem;
+        color: var(--gray);
+        font-style: italic;
+        opacity: 0.7;
+    }
+
+    /* Footer */
+    footer {
+        background: var(--black-light);
+        border-top: 1px solid rgba(212, 175, 55, 0.2);
+        padding: 4rem 2rem 2rem;
+    }
+
+    .footer-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .footer-content {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 3rem;
+        margin-bottom: 3rem;
+    }
+
+    .footer-section h4 {
+        color: var(--gold);
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-bottom: 1.25rem;
+    }
+
+    .footer-section p,
+    .footer-section a {
+        color: var(--gray);
+        font-size: 0.9rem;
+        line-height: 1.8;
+        text-decoration: none;
+        display: block;
+        margin-bottom: 0.75rem;
+        transition: color 0.3s ease;
+    }
+
+    .footer-section a:hover {
+        color: var(--gold);
+    }
+
+    .footer-bottom {
+        padding-top: 2rem;
+        border-top: 1px solid rgba(212, 175, 55, 0.1);
+        text-align: center;
+        color: var(--gray);
+        font-size: 0.85rem;
+    }
+
+    .social-links {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .social-links a {
+        width: 40px;
+        height: 40px;
+        background: var(--black-lighter);
+        border: 1px solid rgba(212, 175, 55, 0.2);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: var(--transition);
+    }
+
+    .social-links a:hover {
+        background: var(--gold);
+        border-color: var(--gold);
+        transform: translateY(-3px);
+    }
+
+    .social-links a svg {
+        width: 20px;
+        height: 20px;
+        fill: var(--gold);
+    }
+
+    .social-links a:hover svg {
+        fill: var(--black);
+    }
+
+    /* Mobile Styles */
+    @media (max-width: 768px) {
+        .header-inner {
+            padding: 1rem 1.5rem;
+        }
+
+        nav {
+            position: fixed;
+            top: 73px;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 10, 0.98);
+            backdrop-filter: blur(10px);
+            flex-direction: column;
+            padding: 2rem;
+            gap: 1.5rem;
+            border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+            transform: translateY(-100%);
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition);
+        }
+
+        nav.active {
+            transform: translateY(0);
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .mobile-toggle {
+            display: block;
+        }
+
+        .hero {
+            padding: 4rem 1.5rem 3rem;
+        }
+
+        .products-section {
+            padding: 1.5rem 1.5rem 4rem;
+        }
+
+        .products-grid {
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .setup-notice-inner {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .setup-notice h2 {
+            font-size: 0.9rem;
+        }
+
+        .setup-notice p {
+            font-size: 0.85rem;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .category-filters {
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+        }
+    }
+</style>
+</head>
+<body>
+    <!-- Setup Notice -->
+    <div class="setup-notice">
+        <div class="setup-notice-inner">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2L1 21h22L12 2zm0 3.4l8.5 14.6h-17L12 5.4zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"/>
+            </svg>
+            <h2>Setup Required:</h2>
+            <p>Replace REPLACE_ME in each link with your affiliate ID after you join each program.</p>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header>
+        <div class="header-inner">
+            <a href="#" class="logo">
+                <svg class="logo-svg" viewBox="0 0 40 40" fill="none">
+                    <rect width="40" height="40" rx="8" fill="url(#logoGradient)"/>
+                    <path d="M20 10L28 16V28L20 34L12 28V16L20 10Z" stroke="#0a0a0a" stroke-width="2" fill="none"/>
+                    <circle cx="20" cy="20" r="4" fill="#0a0a0a"/>
+                    <defs>
+                        <linearGradient id="logoGradient" x1="0" y1="0" x2="40" y2="40">
+                            <stop offset="0%" stop-color="#D4AF37"/>
+                            <stop offset="100%" stop-color="#B8960F"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <div class="logo-text">Legacy <span>Innovations</span></div>
+            </a>
+            <button class="mobile-toggle" id="mobileToggle">
+                <svg viewBox="0 0 24 24">
+                    <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                </svg>
+            </button>
+            <nav id="nav">
+                <a href="#hair">Hair Care</a>
+                <a href="#toys">Toys & Games</a>
+                <a href="#food">Food</a>
+                <a href="#culture">Art & Culture</a>
+                <a href="#tech">Home & Tech</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-inner">
+            <div class="hero-badge">Black-Owned Excellence</div>
+            <h1>Celebrating Innovation<br>Building Legacy</h1>
+            <p>Discover exceptional products from trailblazing Black-owned brands. Shop with purpose and support businesses shaping the future.</p>
+            <a href="#products" class="hero-cta">
+                Explore Products
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16.172 11l-5.364-5.364 1.414-1.414L20 12l-7.778 7.778-1.414-1.414L16.172 13H4v-2z"/>
+                </svg>
+            </a>
+        </div>
+    </section>
+
+    <!-- Category Filters -->
+    <section class="categories">
+        <div class="category-filters">
+            <button class="filter-btn active" data-filter="all">All Products</button>
+            <button class="filter-btn" data-filter="hair">Hair Care</button>
+            <button class="filter-btn" data-filter="toys">Toys & Games</button>
+            <button class="filter-btn" data-filter="food">Food</button>
+            <button class="filter-btn" data-filter="culture">Art & Culture</button>
+            <button class="filter-btn" data-filter="tech">Home & Tech</button>
+        </div>
+    </section>
+
+    <!-- Products -->
+    <section class="products-section" id="products">
+        <div class="section-header">
+            <h2>Featured Products</h2>
+            <p>Handpicked selections from innovative Black-owned brands across multiple categories</p>
+        </div>
+
+        <!-- Hair Care -->
+        <div class="category-section" id="hair" data-category="hair">
+            <div class="category-title">
+                <div class="category-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2M21 9V7L15 1H9V3H15.5L20 7.5V9H21M21 11H15.5C15.1 11 14.7 10.8 14.5 10.5L14 10C13.6 9.7 13.1 9.5 12.5 9.5H11.5C10.9 9.5 10.4 9.7 10 10L9.5 10.5C9.3 10.8 8.9 11 8.5 11H3V13H8.5L10 13.5L8 15.5V20C8 21.1 8.9 22 10 22H14C15.1 22 16 21.1 16 20V15.5L14 13.5L15.5 13H21V11Z"/>
+                    </svg>
+                </div>
+                <h3>Hair Care</h3>
+            </div>
+            <div class="products-grid">
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                        <span class="product-badge">Bestseller</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Mielle Organics</div>
+                        <h4 class="product-name">Rosemary Mint Scalp & Hair Strengthening Oil</h4>
+                        <p class="product-desc">Infused with biotin and rosemary to encourage longer, healthier hair. Perfect for all hair types and protective styles.</p>
+                        <div class="product-footer">
+                            <a href="https://mielleorganics.com/products/rosemary-mint-scalp-hair-strengthening-oil?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+                        </svg>
+                        <span class="product-badge">Essential</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Bevel</div>
+                        <h4 class="product-name">Shave System</h4>
+                        <p class="product-desc">Complete grooming kit designed to prevent razor bumps and irritation. Includes shaver, brush, blades, and conditioning oil.</p>
+                        <div class="product-footer">
+                            <a href="https://getbevel.com/products/shave-system?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toys & Games -->
+        <div class="category-section" id="toys" data-category="toys">
+            <div class="category-title">
+                <div class="category-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,10.5A1.5,1.5 0 0,1 13.5,12A1.5,1.5 0 0,1 12,13.5A1.5,1.5 0 0,1 10.5,12A1.5,1.5 0 0,1 12,10.5M7.5,10.5A1.5,1.5 0 0,1 9,12A1.5,1.5 0 0,1 7.5,13.5A1.5,1.5 0 0,1 6,12A1.5,1.5 0 0,1 7.5,10.5M16.5,10.5A1.5,1.5 0 0,1 18,12A1.5,1.5 0 0,1 16.5,13.5A1.5,1.5 0 0,1 15,12A1.5,1.5 0 0,1 16.5,10.5Z"/>
+                    </svg>
+                </div>
+                <h3>Toys & Games</h3>
+            </div>
+            <div class="products-grid">
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18.62,3H5.38C4.1,3 3,4.1 3,5.38V18.62C3,19.9 4.1,21 5.38,21H18.62C19.9,21 21,19.9 21,18.62V5.38C21,4.1 19.9,3 18.62,3M12,16.75C11.86,16.75 11.71,16.73 11.56,16.69L7.38,18.5L7.75,14.32C6.65,13.43 5.75,12.15 5.75,10.75C5.75,8.04 8.04,6.25 12,6.25C15.96,6.25 18.25,8.04 18.25,10.75C18.25,13.46 15.96,16.75 12,16.75Z"/>
+                        </svg>
+                        <span class="product-badge">Classic</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Super Soaker</div>
+                        <h4 class="product-name">Water Blaster Collection</h4>
+                        <p class="product-desc">Iconic water blasters invented by Lonnie Johnson. Perfect for summer fun and outdoor activities with family and friends.</p>
+                        <div class="product-footer">
+                            <a href="https://www.amazon.com/s?k=super+soaker&tag=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+                        </svg>
+                        <span class="product-badge">Educational</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">World of EPI</div>
+                        <h4 class="product-name">Diverse Doll Collection</h4>
+                        <p class="product-desc">Beautiful dolls that celebrate diversity and representation. Inspiring young minds with positive role models and cultural pride.</p>
+                        <div class="product-footer">
+                            <a href="https://worldofepi.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Food -->
+        <div class="category-section" id="food" data-category="food">
+            <div class="category-title">
+                <div class="category-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/>
+                    </svg>
+                </div>
+                <h3>Food</h3>
+            </div>
+            <div class="products-grid">
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                        </svg>
+                        <span class="product-badge">Top Rated</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Partake Foods</div>
+                        <h4 class="product-name">Allergen-Free Cookies</h4>
+                        <p class="product-desc">Delicious cookies free from top 8 allergens. Vegan, gluten-free, and made with simple, clean ingredients everyone can enjoy.</p>
+                        <div class="product-footer">
+                            <a href="https://partakefoods.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z"/>
+                        </svg>
+                        <span class="product-badge">Spicy</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">A Dozen Cousins</div>
+                        <h4 class="product-name">Ready-to-Eat Beans & Rice</h4>
+                        <p class="product-desc">Authentic Caribbean, Latin, and Creole flavors. Heat-and-eat meals with clean ingredients and bold, ancestral recipes.</p>
+                        <div class="product-footer">
+                            <a href="https://adozencousins.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Art & Culture -->
+        <div class="category-section" id="culture" data-category="culture">
+            <div class="category-title">
+                <div class="category-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M7.5,5.6L5,7L6.4,4.5L5,2L7.5,3.4L10,2L8.6,4.5L10,7L7.5,5.6M19.5,15.4L22,14L20.6,16.5L22,19L19.5,17.6L17,19L18.4,16.5L17,14L19.5,15.4M22,2L20.6,4.5L22,7L19.5,5.6L17,7L18.4,4.5L17,2L19.5,3.4L22,2M13.34,12.78L15.78,10.34L13.66,8.22L11.22,10.66L13.34,12.78M14.37,7.29L16.71,9.63C17.1,10 17.1,10.65 16.71,11.04L5.04,22.71C4.65,23.1 4,23.1 3.63,22.71L1.29,20.37C0.9,20 0.9,19.35 1.29,18.96L12.96,7.29C13.35,6.9 14,6.9 14.37,7.29Z"/>
+                    </svg>
+                </div>
+                <h3>Art & Culture</h3>
+            </div>
+            <div class="products-grid">
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M9,11.5A2.5,2.5 0 0,0 11.5,9A2.5,2.5 0 0,0 9,6.5A2.5,2.5 0 0,0 6.5,9A2.5,2.5 0 0,0 9,11.5M9,5A4,4 0 0,1 13,9A4,4 0 0,1 9,13A4,4 0 0,1 5,9A4,4 0 0,1 9,5M20,12.5C20,11.7 19.3,11 18.5,11H17V9H15V11H11V9H9V11H7.5C6.7,11 6,11.7 6,12.5V15H4V9H2V15A2,2 0 0,0 4,17H6V21H18V17H20A2,2 0 0,0 22,15V9H20V15H20V12.5Z"/>
+                        </svg>
+                        <span class="product-badge">Premium</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">McBride Sisters</div>
+                        <h4 class="product-name">Signature Wine Collection</h4>
+                        <p class="product-desc">Award-winning wines celebrating sisterhood and legacy. The largest Black-owned wine company in the United States.</p>
+                        <div class="product-footer">
+                            <a href="https://mcbridesisters.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M9 3V4H4V6H5V19A2 2 0 0 0 7 21H17A2 2 0 0 0 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/>
+                        </svg>
+                        <span class="product-badge">Featured</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Black Authors Books</div>
+                        <h4 class="product-name">Curated Book Collection</h4>
+                        <p class="product-desc">Thoughtfully selected books by Black authors. Expand your library with powerful stories, perspectives, and knowledge.</p>
+                        <div class="product-footer">
+                            <a href="https://mahoganybooks.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Home & Tech -->
+        <div class="category-section" id="tech" data-category="tech">
+            <div class="category-title">
+                <div class="category-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M17,1.01L7,1C5.9,1 5,1.9 5,3V21C5,22.1 5.9,23 7,23H17C18.1,23 19,22.1 19,21V3C19,1.9 18.1,1.01 17,1.01M17,19H7V5H17V19M16,13H13V16H11V13H8V11H11V8H13V11H16V13Z"/>
+                    </svg>
+                </div>
+                <h3>Home & Tech</h3>
+            </div>
+            <div class="products-grid">
+                <div class="product-card">
+                    <div class="product-image">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75M12,15C13.5,15 16.5,15.75 16.5,17.25V18H7.5V17.25C7.5,15.75 10.5,15 12,15Z"/>
+                        </svg>
+                        <span class="product-badge">Innovation</span>
+                    </div>
+                    <div class="product-content">
+                        <div class="product-brand">Lisnr</div>
+                        <h4 class="product-name">Data-Over-Audio Technology</h4>
+                        <p class="product-desc">Revolutionary contactless payment and authentication platform. Using sound waves for secure, seamless transactions.</p>
+                        <div class="product-footer">
+                            <a href="https://lisnr.com/?affiliate=REPLACE_ME" target="_blank" rel="noopener noreferrer" class="buy-btn">
+                                Buy Now
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14 3v2h3.59l-9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7z"/>
+                                </svg>
+                            </a>
+                            <span class="affiliate-note">Affiliate link - replace with yours</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-inner">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>Legacy Innovations</h4>
+                    <p>Celebrating Black excellence through commerce. Supporting innovative brands and building economic legacy together.</p>
+                    <div class="social-links">
+                        <a href="#" aria-label="Instagram">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M7.8,2H16.2C19.4,2 22,4.6 22,7.8V16.2A5.8,5.8 0 0,1 16.2,22H7.8C4.6,22 2,19.4 2,16.2V7.8A5.8,5.8 0 0,1 7.8,2M7.6,4A3.6,3.6 0 0,0 4,7.6V16.4C4,18.39 5.61,20 7.6,20H16.4A3.6,3.6 0 0,0 20,16.4V7.6C20,5.61 18.39,4 16.4,4H7.6M17.25,5.5A1.25,1.25 0 0,1 18.5,6.75A1.25,1.25 0 0,1 17.25,8A1.25,1.25 0 0,1 16,6.75A1.25,1.25 0 0,1 17.25,5.5M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9Z"/>
+                            </svg>
+                        </a>
+                        <a href="#" aria-label="Twitter">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M22.46,6C21.69,6.35 20.86,6.58 20,6.69C20.88,6.16 21.56,5.32 21.88,4.31C21.05,4.81 20.13,5.16 19.16,5.36C18.37,4.5 17.26,4 16,4C13.65,4 11.73,5.92 11.73,8.29C11.73,8.63 11.77,8.96 11.84,9.27C8.28,9.09 5.11,7.38 3,4.79C2.63,5.42 2.42,6.16 2.42,6.94C2.42,8.43 3.17,9.75 4.33,10.5C3.62,10.5 2.96,10.3 2.38,10C2.38,10 2.38,10 2.38,10.03C2.38,12.11 3.86,13.85 5.82,14.24C5.46,14.34 5.08,14.39 4.69,14.39C4.42,14.39 4.15,14.36 3.89,14.31C4.43,16 6,17.26 7.89,17.29C6.43,18.45 4.58,19.13 2.56,19.13C2.22,19.13 1.88,19.11 1.54,19.07C3.44,20.29 5.7,21 8.12,21C16,21 20.33,14.46 20.33,8.79C20.33,8.6 20.33,8.42 20.32,8.23C21.16,7.63 21.88,6.87 22.46,6Z"/>
+                            </svg>
+                        </a>
+                        <a href="#" aria-label="Facebook">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 2.04C6.5 2.04 2 6.53 2 12.06C2 17.06 5.66 21.21 10.44 21.96V14.96H7.9V12.06H10.44V9.85C10.44 7.34 11.93 5.96 14.22 5.96C15.31 5.96 16.45 6.15 16.45 6.15V8.62H15.19C13.95 8.62 13.56 9.39 13.56 10.18V12.06H16.34L15.89 14.96H13.56V21.96A10 10 0 0 0 22 12.06C22 6.53 17.5 2.04 12 2.04Z"/>
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h4>Categories</h4>
+                    <a href="#hair">Hair Care</a>
+                    <a href="#toys">Toys & Games</a>
+                    <a href="#food">Food</a>
+                    <a href="#culture">Art & Culture</a>
+                    <a href="#tech">Home & Tech</a>
+                </div>
+                <div class="footer-section">
+                    <h4>About</h4>
+                    <a href="#">Our Mission</a>
+                    <a href="#">Partner With Us</a>
+                    <a href="#">Brand Stories</a>
+                    <a href="#">Community Impact</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Support</h4>
+                    <a href="#">Contact Us</a>
+                    <a href="#">Affiliate Program</a>
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 Legacy Innovations. All rights reserved. Built to celebrate and support Black-owned excellence.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Mobile Menu Toggle
+        const mobileToggle = document.getElementById('mobileToggle');
+        const nav = document.getElementById('nav');
+        
+        mobileToggle.addEventListener('click', () => {
+            nav.classList.toggle('active');
+        });
+
+        // Close mobile menu when clicking a link
+        document.querySelectorAll('nav a').forEach(link => {
+            link.addEventListener('click', () => {
+                nav.classList.remove('active');
+            });
+        });
+
+        // Category Filter
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const categorySections = document.querySelectorAll('.category-section');
+
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const filter = btn.getAttribute('data-filter');
+                
+                // Update active button
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Filter sections
+                categorySections.forEach(section => {
+                    if (filter === 'all' || section.getAttribute('data-category') === filter) {
+                        section.style.display = 'block';
+                        section.style.animation = 'fadeInUp 0.5s ease';
+                    } else {
+                        section.style.display = 'none';
+                    }
+                });
+
+                // Scroll to products if filtering
+                if (filter !== 'all') {
+                    document.getElementById('products').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                const href = this.getAttribute('href');
+                if (href !== '#') {
+                    e.preventDefault();
+                    const target = document.querySelector(href);
+                    if (target) {
+                        const headerOffset = 100;
+                        const elementPosition = target.getBoundingClientRect().top;
+                        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+                        
+                        window.scrollTo({
+                            top: offsetPosition,
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+            });
+        });
+
+        // Header shadow on scroll
+        const header = document.querySelector('header');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 50) {
+                header.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
+            } else {
+                header.style.boxShadow = 'none';
+            }
+        });
+
+        // Intersection Observer for fade-in animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animation = 'fadeInUp 0.6s ease forwards';
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.product-card').forEach(card => {
+            card.style.opacity = '0';
+            observer.observe(card);
+        });
+    </script>
+</body>
+</html>
